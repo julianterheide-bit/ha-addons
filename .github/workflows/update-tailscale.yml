@@ -1,0 +1,63 @@
+name: Update Tailscale
+
+on:
+  schedule:
+    - cron: '0 0 * * *'   # Daily at midnight UTC
+  workflow_dispatch: {}    # Allow manual trigger from the Actions tab
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get latest Tailscale release
+        id: tailscale
+        run: |
+          set -euo pipefail
+          LATEST_TAG=$(curl -fsSL \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/tailscale/tailscale/releases/latest \
+            | jq -r '.tag_name')
+          LATEST="${LATEST_TAG#v}"
+
+          CURRENT_TAG=$(grep -oP 'ARG TAILSCALE_VERSION="\Kv?[0-9.]+(?=")' tailscale/Dockerfile)
+          CURRENT="${CURRENT_TAG#v}"
+
+          echo "latest=${LATEST}" >> "$GITHUB_OUTPUT"
+          echo "current=${CURRENT}" >> "$GITHUB_OUTPUT"
+          echo "Latest upstream: ${LATEST} | Currently pinned: ${CURRENT}"
+
+      - name: Check if update needed
+        id: check
+        run: |
+          if [ "${{ steps.tailscale.outputs.latest }}" != "${{ steps.tailscale.outputs.current }}" ]; then
+            echo "needs_update=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_update=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update Dockerfile version pin
+        if: steps.check.outputs.needs_update == 'true'
+        run: |
+          sed -i \
+            "s/ARG TAILSCALE_VERSION=\"v\?[0-9.]*\"/ARG TAILSCALE_VERSION=\"v${{ steps.tailscale.outputs.latest }}\"/" \
+            tailscale/Dockerfile
+
+      - name: Bump add-on version in config.yaml
+        if: steps.check.outputs.needs_update == 'true'
+        run: |
+          sed -i \
+            "s/^version: .*/version: ${{ steps.tailscale.outputs.latest }}/" \
+            tailscale/config.yaml
+
+      - name: Commit and push
+        if: steps.check.outputs.needs_update == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add tailscale/Dockerfile tailscale/config.yaml
+          git commit -m "chore: bump Tailscale to ${{ steps.tailscale.outputs.latest }}"
+          git push
