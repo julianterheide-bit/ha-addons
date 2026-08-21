@@ -1,6 +1,6 @@
 ---
 name: Tailscale
-version: 1.102.2
+version: 1.102.3
 slug: tailscale
 description: Zero config VPN for building secure networks
 url: https://github.com/julianterheide-bit/ha-addons
